@@ -146,6 +146,30 @@ const Sidebar: React.FC = () => {
             </select>
           </div>
 
+          {/* Group Filter */}
+          <div className="mb-4">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Filter by Group
+            </label>
+            <select
+              value={filters.groupFilter || "all"}
+              onChange={(e) =>
+                handleFilterChange("groupFilter", e.target.value)
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Groups</option>
+              <option value="resolve">Resolve</option>
+              <option value="regression-done">Regression Done</option>
+              <option value="test-done">Test Done</option>
+              <option value="testing">Testing</option>
+              <option value="ready-to-test">Ready to Test</option>
+              <option value="review-done">Review Done</option>
+              <option value="in-review">In Review</option>
+              <option value="in-progress">In Progress</option>
+            </select>
+          </div>
+
           <button
             onClick={clearFilters}
             className="w-full bg-gray-100 text-gray-700 py-2 px-4 rounded-md text-sm font-medium hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"

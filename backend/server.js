@@ -66,8 +66,13 @@ app.get("/api/jira-issues", async (req, res) => {
           "labels",
           "issuetype",
           "description",
+          "sprint",
+          "customfield_10020", // Common sprint field
+          "customfield_10010", // Another common sprint field
+          "customfield_10014", // Yet another common sprint field
         ].join(","),
         maxResults: 1000,
+        expand: "names",
       },
     });
 
@@ -79,6 +84,40 @@ app.get("/api/jira-issues", async (req, res) => {
     );
     res.status(error.response?.status || 500).json({
       error: "Failed to fetch issues",
+      message: error.response?.data?.errorMessages?.[0] || error.message,
+      details: error.response?.data || null,
+    });
+  }
+});
+
+// Get field information to help identify sprint fields
+app.get("/api/jira-fields", async (req, res) => {
+  try {
+    console.log("Fetching Jira field information...");
+
+    const response = await axios.get(`${JIRA_BASE_URL}/rest/api/3/field`, {
+      headers: getJiraHeaders(),
+    });
+
+    // Filter for sprint-related fields
+    const sprintFields = response.data.filter(
+      (field) =>
+        field.name.toLowerCase().includes("sprint") ||
+        field.id.includes("sprint") ||
+        field.schema?.customId === "com.pyxis.greenhopper.jira:gh-sprint"
+    );
+
+    res.json({
+      sprintFields,
+      allFieldsCount: response.data.length,
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching Jira fields:",
+      error.response?.data || error.message
+    );
+    res.status(error.response?.status || 500).json({
+      error: "Failed to fetch fields",
       message: error.response?.data?.errorMessages?.[0] || error.message,
       details: error.response?.data || null,
     });
@@ -163,6 +202,40 @@ app.get("/api/sprint/:sprintId", async (req, res) => {
     );
     res.status(error.response?.status || 500).json({
       error: "Failed to fetch sprint details",
+      message: error.response?.data?.errorMessages?.[0] || error.message,
+      details: error.response?.data || null,
+    });
+  }
+});
+
+// Get field information to help identify sprint fields
+app.get("/api/jira-fields", async (req, res) => {
+  try {
+    console.log("Fetching Jira field information...");
+
+    const response = await axios.get(`${JIRA_BASE_URL}/rest/api/3/field`, {
+      headers: getJiraHeaders(),
+    });
+
+    // Filter for sprint-related fields
+    const sprintFields = response.data.filter(
+      (field) =>
+        field.name.toLowerCase().includes("sprint") ||
+        field.id.includes("sprint") ||
+        field.schema?.customId === "com.pyxis.greenhopper.jira:gh-sprint"
+    );
+
+    res.json({
+      sprintFields,
+      allFieldsCount: response.data.length,
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching Jira fields:",
+      error.response?.data || error.message
+    );
+    res.status(error.response?.status || 500).json({
+      error: "Failed to fetch fields",
       message: error.response?.data?.errorMessages?.[0] || error.message,
       details: error.response?.data || null,
     });

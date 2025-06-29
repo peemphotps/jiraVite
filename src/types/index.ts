@@ -17,6 +17,11 @@ export interface JiraIssue {
   labels: string[];
   issueType: string;
   description?: string;
+  sprint?: {
+    id: number;
+    name: string;
+    state?: string;
+  };
   // Approval flags
   pmApprovalRequired?: boolean;
   postCheckApprovalRequired?: boolean;
@@ -60,8 +65,19 @@ export type IssueStatus =
 export interface FilterOptions {
   status?: string;
   assignee?: string;
+  sprint?: string;
   approvalFilter?: "pm" | "postCheck" | "testResult" | "all";
   searchText?: string;
+  groupFilter?:
+    | "resolve"
+    | "regression-done"
+    | "test-done"
+    | "testing"
+    | "ready-to-test"
+    | "review-done"
+    | "in-review"
+    | "in-progress"
+    | "all";
 }
 
 export interface ColumnConfig {

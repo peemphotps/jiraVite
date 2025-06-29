@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jira Issues Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Jira Issues Dashboard</h1>
+        <p><a href="sprints.html">Go to Sprints Search</a></p>
+
+
+        <div id="controls">
+            <div class="jql-input-container">
+                <label for="jqlQueryInput">Enter JQL Query:</label>
+                <input type="text" id="jqlQueryInput" placeholder="e.g., project = POSC AND Sprint = 5526 ORDER BY created DESC" value="project = POSC AND Sprint = 5526 ORDER BY created DESC">
+            </div>
+            <div class="button-group">
+                <button id="searchIssuesButton">Search Issues</button>
+                <button id="resetColumnsButton" class="secondary-button" title="Reset column widths to default">Reset Columns</button>
+            </div>
+            <div class="filter-buttons">
+                <label>Filter by Approval Needs:</label>
+                <div class="approval-filters">
+                    <button id="filterAllButton" class="filter-btn active">Show All</button>
+                    <button id="filterPMButton" class="filter-btn pm-filter">Need PM Approval</button>
+                    <button id="filterPostCheckButton" class="filter-btn post-check-filter">Need Post Check</button>
+                    <button id="filterTestResultButton" class="filter-btn test-result-filter">Need Test Result</button>
+                    <button id="filterAnyApprovalButton" class="filter-btn any-approval-filter">Any Approval Needed</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading-message" class="message">Loading issues...</div>
+        <div id="error-message" class="message error-message"></div>
+        <div id="no-issues-message" class="message"></div>
+
+        <table id="issuesTable" class="resizable-table">
+    <thead>
+        <tr>
+            <th>Key<span class="column-resizer"></span></th>
+            <th>Summary<span class="column-resizer"></span></th>
+            <th>Status<span class="column-resizer"></span></th>
+            <th>Type<span class="column-resizer"></span></th>
+            <th>Assignee<span class="column-resizer"></span></th>
+            <th>Priority<span class="column-resizer"></span></th>
+            <th>Labels<span class="column-resizer"></span></th>
+            <th>Remarks<span class="column-resizer"></span></th>
+            <th>Created<span class="column-resizer"></span></th>
+            <th>Updated</th>
+        </tr>
+    </thead>
+    <tbody id="issuesBody">
+        <!-- Issues will be populated here -->
+    </tbody>
+</table>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -92,6 +92,17 @@ export const filterIssues = (
       return false;
     }
 
+    // Sprint filter
+    if (filters.sprint) {
+      if (filters.sprint === "no-sprint") {
+        if (issue.sprint) return false;
+      } else {
+        if (!issue.sprint || issue.sprint.name !== filters.sprint) {
+          return false;
+        }
+      }
+    }
+
     // Search text filter
     if (filters.searchText) {
       const searchLower = filters.searchText.toLowerCase();
@@ -115,6 +126,56 @@ export const filterIssues = (
           return issue.postCheckApprovalRequired;
         case "testResult":
           return issue.testResultApprovalRequired;
+        default:
+          return true;
+      }
+    }
+
+    // Group filter
+    if (filters.groupFilter && filters.groupFilter !== "all") {
+      const statusLower = issue.status.toLowerCase();
+      const summaryLower = issue.summary.toLowerCase();
+
+      switch (filters.groupFilter) {
+        case "resolve":
+          return (
+            statusLower.includes("resolve") || summaryLower.includes("resolve")
+          );
+        case "regression-done":
+          return (
+            statusLower.includes("regression") ||
+            summaryLower.includes("regression")
+          );
+        case "test-done":
+          return (
+            statusLower.includes("test done") ||
+            summaryLower.includes("test done")
+          );
+        case "testing":
+          return (
+            statusLower.includes("testing") || summaryLower.includes("testing")
+          );
+        case "ready-to-test":
+          return (
+            statusLower.includes("ready to test") ||
+            summaryLower.includes("ready to test")
+          );
+        case "review-done":
+          return (
+            statusLower.includes("review done") ||
+            summaryLower.includes("review done")
+          );
+        case "in-review":
+          return (
+            statusLower.includes("in review") ||
+            summaryLower.includes("in review")
+          );
+        case "in-progress":
+          return (
+            statusLower.includes("in progress") ||
+            statusLower.includes("in-progress") ||
+            summaryLower.includes("in progress")
+          );
         default:
           return true;
       }
