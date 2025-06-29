@@ -11,8 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 // Jira API configuration
-const JIRA_BASE_URL =
-  process.env.JIRA_BASE_URL || "https://linemanwongnai.atlassian.net";
+const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
 const JIRA_EMAIL = process.env.JIRA_EMAIL;
 const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN;
 
