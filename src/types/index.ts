@@ -43,6 +43,11 @@ export interface Board {
   id: number;
   name: string;
   type: string;
+  location?: {
+    projectId?: number;
+    projectKey?: string;
+    projectName?: string;
+  };
 }
 
 export interface JiraConfig {

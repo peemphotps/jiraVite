@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import type { JiraIssue, Sprint, FilterOptions, ColumnConfig } from "../types";
+import type {
+  JiraIssue,
+  Sprint,
+  Board,
+  FilterOptions,
+  ColumnConfig,
+} from "../types";
 
 interface JiraStore {
   // Issues
@@ -11,6 +17,11 @@ interface JiraStore {
   sprints: Sprint[];
   sprintsLoading: boolean;
   sprintsError: string | null;
+
+  // Boards
+  boards: Board[];
+  boardsLoading: boolean;
+  boardsError: string | null;
 
   // Filters
   currentJQL: string;
@@ -28,6 +39,10 @@ interface JiraStore {
   setSprints: (sprints: Sprint[]) => void;
   setSprintsLoading: (loading: boolean) => void;
   setSprintsError: (error: string | null) => void;
+
+  setBoards: (boards: Board[]) => void;
+  setBoardsLoading: (loading: boolean) => void;
+  setBoardsError: (error: string | null) => void;
 
   setCurrentJQL: (jql: string) => void;
   setFilters: (filters: FilterOptions) => void;
@@ -105,6 +120,10 @@ export const useJiraStore = create<JiraStore>((set, get) => ({
   sprintsLoading: false,
   sprintsError: null,
 
+  boards: [],
+  boardsLoading: false,
+  boardsError: null,
+
   currentJQL: "project = POSC AND Sprint = 5526 ORDER BY created DESC",
   filters: {},
 
@@ -119,6 +138,10 @@ export const useJiraStore = create<JiraStore>((set, get) => ({
   setSprints: (sprints) => set({ sprints }),
   setSprintsLoading: (sprintsLoading) => set({ sprintsLoading }),
   setSprintsError: (sprintsError) => set({ sprintsError }),
+
+  setBoards: (boards) => set({ boards }),
+  setBoardsLoading: (boardsLoading) => set({ boardsLoading }),
+  setBoardsError: (boardsError) => set({ boardsError }),
 
   setCurrentJQL: (currentJQL) => set({ currentJQL }),
   setFilters: (filters) => set({ filters }),

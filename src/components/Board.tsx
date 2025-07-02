@@ -4,7 +4,11 @@ import { filterIssues, formatDate, getJiraIssueUrl } from "../utils";
 import type { JiraIssue } from "../types";
 import axios from "axios";
 
-const Board: React.FC = () => {
+interface BoardProps {
+  onNavigateToSprints?: () => void;
+}
+
+const Board: React.FC<BoardProps> = ({ onNavigateToSprints }) => {
   const {
     loading,
     error,
@@ -1243,9 +1247,49 @@ const Board: React.FC = () => {
             flexDirection: "column",
           }}
         >
-          <h1 style={{ color: "#0747a6", marginTop: 0 }}>
-            Jira Issues Dashboard
-          </h1>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "20px",
+            }}
+          >
+            <h1 style={{ color: "#0747a6", marginTop: 0, marginBottom: 0 }}>
+              Jira Issues Dashboard
+            </h1>
+            <button
+              onClick={() => onNavigateToSprints && onNavigateToSprints()}
+              style={{
+                backgroundColor: "#6f42c1",
+                color: "white",
+                border: "none",
+                padding: "10px 16px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "14px",
+                fontWeight: "600",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                transition: "all 0.2s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "#5a2d91";
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 4px 8px rgba(0,0,0,0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "#6f42c1";
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+              }}
+            >
+              <span>🏃‍♂️</span>
+              Sprint Search
+            </button>
+          </div>
 
           {/* Sprint Search Section */}
           <div

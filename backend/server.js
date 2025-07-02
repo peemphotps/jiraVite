@@ -207,34 +207,77 @@ app.get("/api/sprint/:sprintId", async (req, res) => {
   }
 });
 
-// Get field information to help identify sprint fields
-app.get("/api/jira-fields", async (req, res) => {
+// Get Jira boards
+app.get("/api/jira-boards", async (req, res) => {
   try {
-    console.log("Fetching Jira field information...");
+    const { type = "scrum", name } = req.query;
 
-    const response = await axios.get(`${JIRA_BASE_URL}/rest/api/3/field`, {
-      headers: getJiraHeaders(),
-    });
+    console.log("Fetching Jira boards...");
 
-    // Filter for sprint-related fields
-    const sprintFields = response.data.filter(
-      (field) =>
-        field.name.toLowerCase().includes("sprint") ||
-        field.id.includes("sprint") ||
-        field.schema?.customId === "com.pyxis.greenhopper.jira:gh-sprint"
+    // Define the allowed project keys
+    const ALLOWED_PROJECT_KEYS = ["WNPOS", "PS", "POSC"];
+
+    let allBoards = [];
+
+    // Fetch boards for each allowed project key
+    for (const projectKey of ALLOWED_PROJECT_KEYS) {
+      try {
+        const params = {
+          maxResults: 1000,
+          type,
+          projectKeyOrId: projectKey,
+        };
+
+        if (name) {
+          params.name = name;
+        }
+
+        console.log(`Fetching boards for project: ${projectKey}`);
+
+        const response = await axios.get(
+          `${JIRA_BASE_URL}/rest/agile/1.0/board`,
+          {
+            headers: getJiraHeaders(),
+            params,
+          }
+        );
+
+        if (response.data.values && response.data.values.length > 0) {
+          allBoards.push(...response.data.values);
+        }
+      } catch (projectError) {
+        console.warn(
+          `Failed to fetch boards for project ${projectKey}:`,
+          projectError.response?.data || projectError.message
+        );
+        // Continue with other projects even if one fails
+      }
+    }
+
+    // Remove duplicates based on board ID
+    const uniqueBoards = allBoards.filter(
+      (board, index, self) => index === self.findIndex((b) => b.id === board.id)
     );
 
+    console.log(
+      `Found ${uniqueBoards.length} unique boards across ${ALLOWED_PROJECT_KEYS.length} projects`
+    );
+
+    // Return in the same format as the original API
     res.json({
-      sprintFields,
-      allFieldsCount: response.data.length,
+      startAt: 0,
+      maxResults: uniqueBoards.length,
+      total: uniqueBoards.length,
+      isLast: true,
+      values: uniqueBoards,
     });
   } catch (error) {
     console.error(
-      "Error fetching Jira fields:",
+      "Error fetching Jira boards:",
       error.response?.data || error.message
     );
     res.status(error.response?.status || 500).json({
-      error: "Failed to fetch fields",
+      error: "Failed to fetch boards",
       message: error.response?.data?.errorMessages?.[0] || error.message,
       details: error.response?.data || null,
     });
