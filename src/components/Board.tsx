@@ -25,6 +25,7 @@ const Board: React.FC = () => {
   } | null>(null);
   const [remarkFilters, setRemarkFilters] = useState<string[]>([]);
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
+  const [assigneeFilters, setAssigneeFilters] = useState<string[]>([]);
 
   // State for multi-select dropdowns
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
@@ -34,13 +35,62 @@ const Board: React.FC = () => {
 
   // State for sprint search
   const [boardId, setBoardId] = useState<string>("506");
-  const [sprintSearchResults, setSprintSearchResults] = useState<Array<{
-    id: number;
-    name: string;
-    state: string;
-  }>>([]);
-  const [sprintSearchLoading, setSprintSearchLoading] = useState<boolean>(false);
-  const [sprintSearchError, setSprintSearchError] = useState<string | null>(null);
+  const [sprintSearchResults, setSprintSearchResults] = useState<
+    Array<{
+      id: number;
+      name: string;
+      state: string;
+    }>
+  >([]);
+  const [sprintSearchLoading, setSprintSearchLoading] =
+    useState<boolean>(false);
+  const [sprintSearchError, setSprintSearchError] = useState<string | null>(
+    null
+  );
+
+  // State for generated task list
+  const [showTaskList, setShowTaskList] = useState<boolean>(false);
+  const [generatedTaskList, setGeneratedTaskList] = useState<string>("");
+  const [taskListItems, setTaskListItems] = useState<
+    Array<{ id: string; text: string; selected: boolean }>
+  >([]);
+  const [selectAll, setSelectAll] = useState<boolean>(true);
+
+  // State for format field selection
+  const [formatFields, setFormatFields] = useState({
+    key: true,
+    status: true,
+    assignee: true,
+    summary: true,
+    remarks: true,
+    priority: false,
+    sprint: false,
+    issueType: false,
+    created: false,
+    updated: false,
+  });
+
+  // State for collapsible sections - default to hidden
+  const [showSelectAllSection, setShowSelectAllSection] =
+    useState<boolean>(false);
+
+  // State for toast notifications
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error" | "info";
+    visible: boolean;
+  }>({ message: "", type: "info", visible: false });
+
+  // Toast utility functions
+  const showToast = useCallback(
+    (message: string, type: "success" | "error" | "info" = "info") => {
+      setToast({ message, type, visible: true });
+      setTimeout(() => {
+        setToast((prev) => ({ ...prev, visible: false }));
+      }, 4000);
+    },
+    []
+  );
 
   // Toggle remark filter
   const toggleRemarkFilter = (remark: string) => {
@@ -74,10 +124,230 @@ const Board: React.FC = () => {
     setStatusFilters([]);
   };
 
+  // Toggle assignee filter
+  const toggleAssigneeFilter = (assignee: string) => {
+    setAssigneeFilters((prev) => {
+      if (prev.includes(assignee)) {
+        return prev.filter((a) => a !== assignee);
+      } else {
+        return [...prev, assignee];
+      }
+    });
+  };
+
+  // Clear all assignee filters
+  const clearAssigneeFilters = () => {
+    setAssigneeFilters([]);
+  };
+
   // Clear all advanced filters
   const clearAllAdvancedFilters = () => {
     setRemarkFilters([]);
     setStatusFilters([]);
+    setAssigneeFilters([]);
+  };
+
+  // Generate task list for copying
+  const generateTaskList = () => {
+    // Sort filtered issues by assignee
+    const sortedIssues = [...filteredIssues].sort((a, b) => {
+      const assigneeA = a.assignee?.displayName || "Unassigned";
+      const assigneeB = b.assignee?.displayName || "Unassigned";
+      return assigneeA.localeCompare(assigneeB);
+    });
+
+    const taskItems = sortedIssues.map((issue) => {
+      // Generate remarks
+      const labels = issue.labels || [];
+      const issueType = issue.issueType?.toLowerCase();
+      const hasTestResultApproved = labels.includes("TEST_RESULT_APPROVED");
+      const hasPostCheckApproved = labels.includes("POST_CHECK_APPROVED");
+      const hasPmApprove = labels.includes("PM_APPROVE");
+      const needsPmApproval =
+        (issueType === "story" || issueType === "production bug") &&
+        !hasPmApprove;
+
+      const remarks = [];
+      if (needsPmApproval) remarks.push("Need PM Approve");
+      if (!hasPostCheckApproved) remarks.push("Need Post check");
+      if (!hasTestResultApproved) remarks.push("Need test result");
+
+      const remarksText =
+        remarks.length > 0 ? remarks.join(", ") : "No remarks";
+      const assigneeText = issue.assignee?.displayName || "Unassigned";
+
+      // Build task text based on selected fields
+      const fields = [];
+      if (formatFields.key) fields.push(getJiraIssueUrl(issue.key));
+      if (formatFields.status) fields.push(issue.status);
+      if (formatFields.assignee) fields.push(assigneeText);
+      if (formatFields.summary) fields.push(issue.summary);
+      if (formatFields.remarks) fields.push(remarksText);
+      if (formatFields.priority) fields.push(issue.priority);
+      if (formatFields.sprint) fields.push(issue.sprint?.name || "No Sprint");
+      if (formatFields.issueType) fields.push(issue.issueType);
+      if (formatFields.created) fields.push(formatDate(issue.created));
+      if (formatFields.updated) fields.push(formatDate(issue.updated));
+
+      const taskText = fields.join(", ");
+
+      return {
+        id: issue.key,
+        text: taskText,
+        selected: true,
+      };
+    });
+
+    setTaskListItems(taskItems);
+    setSelectAll(true);
+    setShowSelectAllSection(false); // Ensure Selection Controls starts hidden
+
+    // Generate the initial text with all items selected
+    const taskListText = taskItems.map((item) => item.text).join("\n");
+    setGeneratedTaskList(taskListText);
+    setShowTaskList(true);
+  };
+
+  // Copy task list to clipboard
+  const copyTaskList = async () => {
+    try {
+      await navigator.clipboard.writeText(generatedTaskList);
+      showToast("Task list copied to clipboard!", "success");
+    } catch (err) {
+      console.error("Failed to copy:", err);
+      showToast("Failed to copy to clipboard", "error");
+    }
+  };
+
+  // Handle select all/none for task list
+  const handleSelectAll = (checked: boolean) => {
+    setSelectAll(checked);
+    const updatedItems = taskListItems.map((item) => ({
+      ...item,
+      selected: checked,
+    }));
+    setTaskListItems(updatedItems);
+
+    // Update the generated text
+    const selectedText = checked
+      ? updatedItems.map((item) => item.text).join("\n")
+      : "";
+    setGeneratedTaskList(selectedText);
+  };
+
+  // Handle individual task selection
+  const handleTaskSelection = (taskId: string, selected: boolean) => {
+    const updatedItems = taskListItems.map((item) =>
+      item.id === taskId ? { ...item, selected } : item
+    );
+    setTaskListItems(updatedItems);
+
+    // Update select all state
+    const allSelected = updatedItems.every((item) => item.selected);
+    setSelectAll(allSelected);
+
+    // Update the generated text with only selected items
+    const selectedText = updatedItems
+      .filter((item) => item.selected)
+      .map((item) => item.text)
+      .join("\n");
+    setGeneratedTaskList(selectedText);
+  };
+
+  // Handle format field toggle
+  const handleFormatFieldToggle = (fieldName: keyof typeof formatFields) => {
+    const updatedFields = {
+      ...formatFields,
+      [fieldName]: !formatFields[fieldName],
+    };
+    setFormatFields(updatedFields);
+
+    // Regenerate task list with new format
+    regenerateTaskListWithFormat(updatedFields);
+  };
+
+  // Get format display string
+  const getFormatString = () => {
+    const fields = [];
+    if (formatFields.key) fields.push("Key(with link)");
+    if (formatFields.status) fields.push("Status");
+    if (formatFields.assignee) fields.push("Assignee");
+    if (formatFields.summary) fields.push("Summary");
+    if (formatFields.remarks) fields.push("Remarks");
+    if (formatFields.priority) fields.push("Priority");
+    if (formatFields.sprint) fields.push("Sprint");
+    if (formatFields.issueType) fields.push("Issue Type");
+    if (formatFields.created) fields.push("Created");
+    if (formatFields.updated) fields.push("Updated");
+
+    return fields.join(", ");
+  };
+
+  // Regenerate task list with new format
+  const regenerateTaskListWithFormat = (fields: typeof formatFields) => {
+    if (taskListItems.length === 0) return;
+
+    // Sort filtered issues by assignee
+    const sortedIssues = [...filteredIssues].sort((a, b) => {
+      const assigneeA = a.assignee?.displayName || "Unassigned";
+      const assigneeB = b.assignee?.displayName || "Unassigned";
+      return assigneeA.localeCompare(assigneeB);
+    });
+
+    const updatedTaskItems = sortedIssues.map((issue) => {
+      // Generate remarks
+      const labels = issue.labels || [];
+      const issueType = issue.issueType?.toLowerCase();
+      const hasTestResultApproved = labels.includes("TEST_RESULT_APPROVED");
+      const hasPostCheckApproved = labels.includes("POST_CHECK_APPROVED");
+      const hasPmApprove = labels.includes("PM_APPROVE");
+      const needsPmApproval =
+        (issueType === "story" || issueType === "production bug") &&
+        !hasPmApprove;
+
+      const remarks = [];
+      if (needsPmApproval) remarks.push("Need PM Approve");
+      if (!hasPostCheckApproved) remarks.push("Need Post check");
+      if (!hasTestResultApproved) remarks.push("Need test result");
+
+      const remarksText =
+        remarks.length > 0 ? remarks.join(", ") : "No remarks";
+      const assigneeText = issue.assignee?.displayName || "Unassigned";
+
+      // Build task text based on selected fields
+      const fieldValues = [];
+      if (fields.key) fieldValues.push(getJiraIssueUrl(issue.key));
+      if (fields.status) fieldValues.push(issue.status);
+      if (fields.assignee) fieldValues.push(assigneeText);
+      if (fields.summary) fieldValues.push(issue.summary);
+      if (fields.remarks) fieldValues.push(remarksText);
+      if (fields.priority) fieldValues.push(issue.priority);
+      if (fields.sprint) fieldValues.push(issue.sprint?.name || "No Sprint");
+      if (fields.issueType) fieldValues.push(issue.issueType);
+      if (fields.created) fieldValues.push(formatDate(issue.created));
+      if (fields.updated) fieldValues.push(formatDate(issue.updated));
+
+      const taskText = fieldValues.join(", ");
+
+      // Preserve existing selection state if item exists
+      const existingItem = taskListItems.find((item) => item.id === issue.key);
+      const isSelected = existingItem ? existingItem.selected : true;
+
+      return {
+        id: issue.key,
+        text: taskText,
+        selected: isSelected,
+      };
+    });
+
+    setTaskListItems(updatedTaskItems);
+
+    // Update the generated text with selected items
+    const selectedText = updatedTaskItems
+      .filter((item) => item.selected)
+      .map((item) => item.text)
+      .join("\n");
+    setGeneratedTaskList(selectedText);
   };
 
   // Sprint search function
@@ -95,18 +365,23 @@ const Board: React.FC = () => {
       const response = await axios.get(
         "http://localhost:3000/api/jira-sprints",
         {
-          params: { boardId: boardIdToSearch }
+          params: { boardId: boardIdToSearch },
         }
       );
-      
+
       if (response.data && response.data.values) {
         // Sort sprints by state priority: active -> future -> closed
-        const sortedSprints = response.data.values.sort((a: { id: number; name: string; state: string }, b: { id: number; name: string; state: string }) => {
-          const stateOrder = { active: 1, future: 2, closed: 3 };
-          const aOrder = stateOrder[a.state as keyof typeof stateOrder] || 4;
-          const bOrder = stateOrder[b.state as keyof typeof stateOrder] || 4;
-          return aOrder - bOrder;
-        });
+        const sortedSprints = response.data.values.sort(
+          (
+            a: { id: number; name: string; state: string },
+            b: { id: number; name: string; state: string }
+          ) => {
+            const stateOrder = { active: 1, future: 2, closed: 3 };
+            const aOrder = stateOrder[a.state as keyof typeof stateOrder] || 4;
+            const bOrder = stateOrder[b.state as keyof typeof stateOrder] || 4;
+            return aOrder - bOrder;
+          }
+        );
         setSprintSearchResults(sortedSprints);
       } else {
         setSprintSearchResults([]);
@@ -280,6 +555,16 @@ const Board: React.FC = () => {
     });
   };
 
+  // Helper function to sort assignees
+  const sortAssignees = (assignees: string[]): string[] => {
+    return [...assignees].sort((a, b) => {
+      // Put "Unassigned" at the end
+      if (a === "Unassigned" && b !== "Unassigned") return 1;
+      if (b === "Unassigned" && a !== "Unassigned") return -1;
+      return a.localeCompare(b);
+    });
+  };
+
   // Fetch issues from API
   const fetchIssues = useCallback(async () => {
     setLoading(true);
@@ -433,20 +718,54 @@ const Board: React.FC = () => {
         }) || [];
 
       setIssues(transformedIssues);
+      showToast(
+        `Successfully loaded ${transformedIssues.length} issues`,
+        "success"
+      );
     } catch (err) {
       console.error("Failed to fetch issues:", err);
-      setError(
-        "Failed to fetch issues. Please check your connection and try again."
-      );
+      const errorMessage =
+        "Failed to fetch issues. Please check your connection and try again.";
+      setError(errorMessage);
+      showToast(errorMessage, "error");
     } finally {
       setLoading(false);
     }
-  }, [currentJQL, setIssues, setLoading, setError]);
+  }, [currentJQL, setIssues, setLoading, setError, showToast]);
 
   // Fetch issues when JQL changes
   useEffect(() => {
     fetchIssues();
   }, [fetchIssues]);
+
+  // Improved search handler
+  const handleSearchIssues = useCallback(
+    async (e?: React.FormEvent) => {
+      if (e) {
+        e.preventDefault();
+      }
+
+      if (!localJQL.trim()) {
+        showToast("Please enter a JQL query", "error");
+        return;
+      }
+
+      showToast("Searching issues...", "info");
+      setCurrentJQL(localJQL);
+    },
+    [localJQL, setCurrentJQL, showToast]
+  );
+
+  // Improved refresh handler
+  const handleRefreshIssues = useCallback(async () => {
+    if (!currentJQL.trim()) {
+      showToast("No JQL query to refresh", "error");
+      return;
+    }
+
+    showToast("Refreshing issues...", "info");
+    await fetchIssues();
+  }, [currentJQL, fetchIssues, showToast]);
 
   // Get enhanced issues with approval flags
   const enhancedIssues = getEnhancedIssues();
@@ -489,10 +808,10 @@ const Board: React.FC = () => {
         const issueType = issue.issueType?.toLowerCase();
         const hasTestResultApproved = labels.includes("TEST_RESULT_APPROVED");
         const hasPostCheckApproved = labels.includes("POST_CHECK_APPROVED");
-        const hasPmApprove = labels.includes("PM_APPROVE");
+        const hasPmApproved = labels.includes("PM_APPROVED");
         const needsPmApproval =
           (issueType === "story" || issueType === "production bug") &&
-          !hasPmApprove;
+          !hasPmApproved;
 
         const issueRemarks: string[] = [];
         if (needsPmApproval) issueRemarks.push("Need PM Approve");
@@ -512,7 +831,16 @@ const Board: React.FC = () => {
       });
     }
 
-    return getSortedIssues(statusFiltered);
+    // Apply assignee filters if any are selected
+    let assigneeFiltered = statusFiltered;
+    if (assigneeFilters.length > 0) {
+      assigneeFiltered = statusFiltered.filter((issue) => {
+        const assigneeName = issue.assignee?.displayName || "Unassigned";
+        return assigneeFilters.includes(assigneeName);
+      });
+    }
+
+    return getSortedIssues(assigneeFiltered);
   }, [
     enhancedIssues,
     filters,
@@ -521,6 +849,7 @@ const Board: React.FC = () => {
     selectedSprints,
     remarkFilters,
     statusFilters,
+    assigneeFilters,
     getSortedIssues,
   ]);
 
@@ -688,10 +1017,6 @@ const Board: React.FC = () => {
             {options.map((option) => (
               <div
                 key={option}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleOption(option);
-                }}
                 style={{
                   padding: "8px 12px",
                   cursor: "pointer",
@@ -719,17 +1044,29 @@ const Board: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={selectedValues.includes(option)}
-                  onChange={() => {}} // Handled by parent onClick
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    toggleOption(option);
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
                   style={{
                     marginRight: "8px",
                     cursor: "pointer",
                   }}
                 />
                 <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleOption(option);
+                  }}
                   style={{
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
+                    cursor: "pointer",
+                    flex: 1,
                   }}
                 >
                   {option}
@@ -798,7 +1135,7 @@ const Board: React.FC = () => {
           </h3>
           <p className="text-gray-600 mb-4">{error}</p>
           <button
-            onClick={fetchIssues}
+            onClick={handleRefreshIssues}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             Try Again
@@ -807,819 +1144,783 @@ const Board: React.FC = () => {
       </div>
     );
   }
+
+  // Toast Component
+  const ToastNotification = () => {
+    if (!toast.visible) return null;
+
+    const getToastStyles = () => {
+      const baseStyles = {
+        position: "fixed" as const,
+        top: "20px",
+        right: "20px",
+        padding: "12px 16px",
+        borderRadius: "6px",
+        color: "white",
+        fontWeight: "500" as const,
+        fontSize: "14px",
+        zIndex: 9999,
+        minWidth: "300px",
+        maxWidth: "500px",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+        animation: toast.visible
+          ? "slideIn 0.3s ease-out"
+          : "slideOut 0.3s ease-in",
+      };
+
+      switch (toast.type) {
+        case "success":
+          return { ...baseStyles, backgroundColor: "#00875a" };
+        case "error":
+          return { ...baseStyles, backgroundColor: "#de350b" };
+        case "info":
+        default:
+          return { ...baseStyles, backgroundColor: "#0052cc" };
+      }
+    };
+
+    return (
+      <div style={getToastStyles()}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span>
+            {toast.type === "success" && "✅"}
+            {toast.type === "error" && "❌"}
+            {toast.type === "info" && "ℹ️"}
+          </span>
+          <span>{toast.message}</span>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div
-      style={{
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-        margin: 0,
-        padding: 0,
-        backgroundColor: "#f4f5f7",
-        color: "#172b4d",
-        minHeight: "100vh",
-      }}
-    >
+    <>
+      <ToastNotification />
+      <style>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+        @keyframes slideOut {
+          from {
+            transform: translateX(0);
+            opacity: 1;
+          }
+          to {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+        }
+      `}</style>
       <div
         style={{
-          width: "100%",
-          minHeight: "100vh",
+          fontFamily:
+            '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
           margin: 0,
-          padding: "20px",
-          backgroundColor: "#ffffff",
-          boxSizing: "border-box",
-          display: "flex",
-          flexDirection: "column",
+          padding: 0,
+          backgroundColor: "#f4f5f7",
+          color: "#172b4d",
+          minHeight: "100vh",
         }}
       >
-        <h1 style={{ color: "#0747a6", marginTop: 0 }}>
-          Jira Issues Dashboard
-        </h1>
-
-        {/* Sprint Search Section */}
         <div
           style={{
-            backgroundColor: "#f0f8ff",
-            border: "1px solid #b3d9ff",
-            borderRadius: "8px",
+            width: "100%",
+            minHeight: "100vh",
+            margin: 0,
             padding: "20px",
-            marginBottom: "20px",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+            backgroundColor: "#ffffff",
+            boxSizing: "border-box",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <h2
+          <h1 style={{ color: "#0747a6", marginTop: 0 }}>
+            Jira Issues Dashboard
+          </h1>
+
+          {/* Sprint Search Section */}
+          <div
             style={{
-              color: "#172b4d",
-              marginTop: 0,
+              backgroundColor: "#f0f8ff",
+              border: "1px solid #b3d9ff",
+              borderRadius: "8px",
+              padding: "20px",
               marginBottom: "20px",
-              fontSize: "18px",
-              fontWeight: "600",
+              boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
             }}
           >
-            Sprint Search
-          </h2>
-
-          <div style={{ marginBottom: "16px" }}>
-            <label
+            <h2
               style={{
-                display: "block",
-                marginBottom: "8px",
-                fontWeight: "600",
                 color: "#172b4d",
-                fontSize: "14px",
+                marginTop: 0,
+                marginBottom: "20px",
+                fontSize: "18px",
+                fontWeight: "600",
               }}
             >
-              Board ID
-            </label>
-            <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
-              <input
-                type="text"
-                value={boardId}
-                onChange={(e) => setBoardId(e.target.value)}
+              Sprint Search
+            </h2>
+
+            <div style={{ marginBottom: "16px" }}>
+              <label
                 style={{
-                  width: "200px",
-                  padding: "10px 12px",
-                  border: "1px solid #dfe1e6",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  backgroundColor: "white",
+                  display: "block",
+                  marginBottom: "8px",
+                  fontWeight: "600",
                   color: "#172b4d",
-                }}
-                placeholder="Enter board ID (default: 506)"
-              />
-              <button
-                onClick={() => searchSprints(boardId)}
-                disabled={sprintSearchLoading}
-                style={{
-                  backgroundColor: sprintSearchLoading ? "#ccc" : "#0052cc",
-                  color: "white",
-                  border: "none",
-                  padding: "10px 16px",
-                  borderRadius: "4px",
-                  cursor: sprintSearchLoading ? "not-allowed" : "pointer",
                   fontSize: "14px",
-                  fontWeight: "500",
                 }}
               >
-                {sprintSearchLoading ? "Searching..." : "Search Sprints"}
-              </button>
+                Board ID
+              </label>
+              <div
+                style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}
+              >
+                <input
+                  type="text"
+                  value={boardId}
+                  onChange={(e) => setBoardId(e.target.value)}
+                  style={{
+                    width: "200px",
+                    padding: "10px 12px",
+                    border: "1px solid #dfe1e6",
+                    borderRadius: "4px",
+                    fontSize: "14px",
+                    backgroundColor: "white",
+                    color: "#172b4d",
+                  }}
+                  placeholder="Enter board ID (default: 506)"
+                />
+                <button
+                  onClick={() => searchSprints(boardId)}
+                  disabled={sprintSearchLoading}
+                  style={{
+                    backgroundColor: sprintSearchLoading ? "#ccc" : "#0052cc",
+                    color: "white",
+                    border: "none",
+                    padding: "10px 16px",
+                    borderRadius: "4px",
+                    cursor: sprintSearchLoading ? "not-allowed" : "pointer",
+                    fontSize: "14px",
+                    fontWeight: "500",
+                  }}
+                >
+                  {sprintSearchLoading ? "Searching..." : "Search Sprints"}
+                </button>
+              </div>
             </div>
-          </div>
 
-          {sprintSearchError && (
-            <div
-              style={{
-                backgroundColor: "#ffebee",
-                color: "#c62828",
-                border: "1px solid #ffcdd2",
-                borderRadius: "4px",
-                padding: "12px",
-                marginBottom: "16px",
-                fontSize: "14px",
-              }}
-            >
-              {sprintSearchError}
-            </div>
-          )}
-
-          {sprintSearchResults.length > 0 && (
-            <div
-              style={{
-                backgroundColor: "#f8f9fa",
-                border: "1px solid #e9ecef",
-                borderRadius: "4px",
-                maxHeight: "300px",
-                overflowY: "auto",
-              }}
-            >
+            {sprintSearchError && (
               <div
                 style={{
-                  backgroundColor: "#e9ecef",
-                  padding: "12px 16px",
-                  borderBottom: "1px solid #dee2e6",
-                  fontWeight: "600",
-                  color: "#495057",
-                  display: "grid",
-                  gridTemplateColumns: "1fr 2fr 1fr",
-                  gap: "16px",
+                  backgroundColor: "#ffebee",
+                  color: "#c62828",
+                  border: "1px solid #ffcdd2",
+                  borderRadius: "4px",
+                  padding: "12px",
+                  marginBottom: "16px",
+                  fontSize: "14px",
                 }}
               >
-                <div>Sprint ID</div>
-                <div>Sprint Name</div>
-                <div>State</div>
+                {sprintSearchError}
               </div>
-              {sprintSearchResults.map((sprint) => (
+            )}
+
+            {sprintSearchResults.length > 0 && (
+              <div
+                style={{
+                  backgroundColor: "#f8f9fa",
+                  border: "1px solid #e9ecef",
+                  borderRadius: "4px",
+                  maxHeight: "300px",
+                  overflowY: "auto",
+                }}
+              >
                 <div
-                  key={sprint.id}
                   style={{
+                    backgroundColor: "#e9ecef",
                     padding: "12px 16px",
                     borderBottom: "1px solid #dee2e6",
+                    fontWeight: "600",
+                    color: "#495057",
                     display: "grid",
                     gridTemplateColumns: "1fr 2fr 1fr",
                     gap: "16px",
-                    fontSize: "14px",
-                    color: "#172b4d",
-                    cursor: "pointer",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = "#e3f2fd";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "transparent";
                   }}
                 >
-                  <div style={{ fontWeight: "500" }}>{sprint.id}</div>
-                  <div>{sprint.name}</div>
-                  <div>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        padding: "2px 8px",
-                        borderRadius: "12px",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        textTransform: "uppercase",
-                        backgroundColor: 
-                          sprint.state === "active" ? "#e8f5e8" :
-                          sprint.state === "closed" ? "#ffebee" : "#f8f9fa",
-                        color: 
-                          sprint.state === "active" ? "#2e7d32" :
-                          sprint.state === "closed" ? "#c62828" : "#5e6c84",
-                      }}
-                    >
-                      {sprint.state}
-                    </span>
-                  </div>
+                  <div>Sprint ID</div>
+                  <div>Sprint Name</div>
+                  <div>State</div>
                 </div>
-              ))}
-            </div>
-          )}
+                {sprintSearchResults.map((sprint) => (
+                  <div
+                    key={sprint.id}
+                    style={{
+                      padding: "12px 16px",
+                      borderBottom: "1px solid #dee2e6",
+                      display: "grid",
+                      gridTemplateColumns: "1fr 2fr 1fr",
+                      gap: "16px",
+                      fontSize: "14px",
+                      color: "#172b4d",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "#e3f2fd";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                  >
+                    <div style={{ fontWeight: "500" }}>{sprint.id}</div>
+                    <div>{sprint.name}</div>
+                    <div>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          fontSize: "12px",
+                          fontWeight: "500",
+                          textTransform: "uppercase",
+                          backgroundColor:
+                            sprint.state === "active"
+                              ? "#e8f5e8"
+                              : sprint.state === "closed"
+                              ? "#ffebee"
+                              : "#f8f9fa",
+                          color:
+                            sprint.state === "active"
+                              ? "#2e7d32"
+                              : sprint.state === "closed"
+                              ? "#c62828"
+                              : "#5e6c84",
+                        }}
+                      >
+                        {sprint.state}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
-          {!sprintSearchLoading && !sprintSearchError && sprintSearchResults.length === 0 && boardId && (
-            <div
-              style={{
-                textAlign: "center",
-                color: "#5e6c84",
-                fontStyle: "italic",
-                padding: "20px",
-                backgroundColor: "#f8f9fa",
-                border: "1px solid #e9ecef",
-                borderRadius: "4px",
-              }}
-            >
-              Click "Search Sprints" to find sprints for board ID: {boardId}
-            </div>
-          )}
-        </div>
-
-        {/* Search & Filters Section */}
-        <div
-          style={{
-            backgroundColor: "#f8f9fa",
-            border: "1px solid #e9ecef",
-            borderRadius: "8px",
-            padding: "20px",
-            marginBottom: "20px",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          }}
-        >
-          <h2
-            style={{
-              color: "#172b4d",
-              marginTop: 0,
-              marginBottom: "20px",
-              fontSize: "18px",
-              fontWeight: "600",
-            }}
-          >
-            Search & Filters
-          </h2>
-
-          {/* JQL Query Section */}
-          <div style={{ marginBottom: "20px" }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: "8px",
-                fontWeight: "600",
-                color: "#172b4d",
-              }}
-            >
-              JQL Query
-            </label>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setCurrentJQL(localJQL);
-              }}
-            >
-              <textarea
-                value={localJQL}
-                onChange={(e) => setLocalJQL(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  border: "1px solid #dfe1e6",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  fontFamily: "monospace",
-                  resize: "vertical",
-                  minHeight: "60px",
-                  backgroundColor: "white",
-                  color: "#172b4d",
-                }}
-                placeholder="Enter JQL query..."
-              />
-              <button
-                type="submit"
-                style={{
-                  marginTop: "8px",
-                  backgroundColor: "#0052cc",
-                  color: "white",
-                  border: "none",
-                  padding: "10px 16px",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: "500",
-                }}
-              >
-                Search Issues
-              </button>
-            </form>
+            {!sprintSearchLoading &&
+              !sprintSearchError &&
+              sprintSearchResults.length === 0 &&
+              boardId && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#5e6c84",
+                    fontStyle: "italic",
+                    padding: "20px",
+                    backgroundColor: "#f8f9fa",
+                    border: "1px solid #e9ecef",
+                    borderRadius: "4px",
+                  }}
+                >
+                  Click "Search Sprints" to find sprints for board ID: {boardId}
+                </div>
+              )}
           </div>
 
-          {/* Quick Filters Section */}
-          <h3
-            style={{
-              color: "#172b4d",
-              marginBottom: "16px",
-              fontSize: "16px",
-              fontWeight: "600",
-            }}
-          >
-            Quick Filters
-          </h3>
-
+          {/* Search & Filters Section */}
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-              gap: "16px",
+              backgroundColor: "#f8f9fa",
+              border: "1px solid #e9ecef",
+              borderRadius: "8px",
+              padding: "20px",
               marginBottom: "20px",
+              boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
             }}
           >
-            {/* Text Search */}
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "4px",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "#5e6c84",
-                }}
-              >
-                Text Search
-              </label>
-              <input
-                type="text"
-                value={filters.searchText || ""}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    searchText: e.target.value || undefined,
-                  })
-                }
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #dfe1e6",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  backgroundColor: "white",
-                  color: "#172b4d",
-                }}
-                placeholder="Search key, summary, description..."
-              />
-            </div>
-
-            {/* Status Filter */}
-            <MultiSelectDropdown
-              label="Status"
-              options={sortStatuses([
-                ...new Set(getEnhancedIssues().map((issue) => issue.status)),
-              ])}
-              selectedValues={selectedStatuses}
-              onSelectionChange={setSelectedStatuses}
-              placeholder="All Statuses"
-              dropdownKey="status"
-            />
-
-            {/* Assignee Filter */}
-            <MultiSelectDropdown
-              label="Assignee"
-              options={
-                [
-                  ...new Set(
-                    getEnhancedIssues()
-                      .map((issue) => issue.assignee?.displayName)
-                      .filter(Boolean)
-                  ),
-                ].sort() as string[]
-              }
-              selectedValues={selectedAssignees}
-              onSelectionChange={setSelectedAssignees}
-              placeholder="All Assignees"
-              dropdownKey="assignee"
-            />
-
-            {/* Sprint Filter */}
-            <MultiSelectDropdown
-              label="Sprint"
-              options={
-                [
-                  "No Sprint",
-                  ...new Set(
-                    getEnhancedIssues()
-                      .map((issue) => issue.sprint?.name)
-                      .filter(Boolean)
-                  ),
-                ].sort() as string[]
-              }
-              selectedValues={selectedSprints}
-              onSelectionChange={setSelectedSprints}
-              placeholder="All Sprints"
-              dropdownKey="sprint"
-            />
-
-            {/* Approval Status Filter */}
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "4px",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "#5e6c84",
-                }}
-              >
-                Approval Status
-              </label>
-              <select
-                value={filters.approvalFilter || "all"}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    approvalFilter:
-                      e.target.value === "all"
-                        ? undefined
-                        : (e.target.value as "pm" | "postCheck" | "testResult"),
-                  })
-                }
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #dfe1e6",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  backgroundColor: "white",
-                  color: "#172b4d",
-                }}
-              >
-                <option value="all">All Issues</option>
-                <option value="pm">PM Approval Required</option>
-                <option value="postCheck">Post Check Required</option>
-                <option value="testResult">Test Result Required</option>
-              </select>
-            </div>
-
-            {/* Group Filter */}
-            <div>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "4px",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "#5e6c84",
-                }}
-              >
-                Filter by Group
-              </label>
-              <select
-                value={filters.groupFilter || "all"}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    groupFilter:
-                      e.target.value === "all"
-                        ? undefined
-                        : (e.target.value as
-                            | "resolve"
-                            | "regression-done"
-                            | "test-done"
-                            | "testing"
-                            | "ready-to-test"
-                            | "review-done"
-                            | "in-review"
-                            | "in-progress"),
-                  })
-                }
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #dfe1e6",
-                  borderRadius: "4px",
-                  fontSize: "14px",
-                  backgroundColor: "white",
-                  color: "#172b4d",
-                }}
-              >
-                <option value="all">All Groups</option>
-                <option value="resolve">Resolve</option>
-                <option value="regression-done">Regression Done</option>
-                <option value="test-done">Test Done</option>
-                <option value="testing">Testing</option>
-                <option value="ready-to-test">Ready to Test</option>
-                <option value="review-done">Review Done</option>
-                <option value="in-review">In Review</option>
-                <option value="in-progress">In Progress</option>
-              </select>
-            </div>
-          </div>
-
-          <button
-            onClick={() => {
-              setFilters({});
-              clearAllMultiSelectFilters();
-            }}
-            style={{
-              backgroundColor: "#f4f5f7",
-              color: "#5e6c84",
-              border: "1px solid #dfe1e6",
-              padding: "8px 16px",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: "500",
-              marginBottom: "20px",
-              marginRight: "10px",
-            }}
-          >
-            Clear Filters
-          </button>
-
-          <button
-            onClick={checkFields}
-            style={{
-              backgroundColor: "#6b778c",
-              color: "white",
-              border: "1px solid #dfe1e6",
-              padding: "8px 16px",
-              borderRadius: "4px",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: "500",
-              marginBottom: "20px",
-            }}
-          >
-            Debug Fields
-          </button>
-
-          {/* Summary Section */}
-          <div
-            style={{
-              borderTop: "1px solid #dfe1e6",
-              paddingTop: "16px",
-            }}
-          >
-            <h3
+            <h2
               style={{
                 color: "#172b4d",
-                marginBottom: "12px",
-                fontSize: "16px",
+                marginTop: 0,
+                marginBottom: "20px",
+                fontSize: "18px",
                 fontWeight: "600",
               }}
             >
-              Summary
-            </h3>
+              Search & Filters
+            </h2>
+
+            {/* JQL Query Section */}
+            <div style={{ marginBottom: "20px" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "8px",
+                  fontWeight: "600",
+                  color: "#172b4d",
+                }}
+              >
+                JQL Query
+              </label>
+              <form onSubmit={handleSearchIssues}>
+                <textarea
+                  value={localJQL}
+                  onChange={(e) => setLocalJQL(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    border: "1px solid #dfe1e6",
+                    borderRadius: "4px",
+                    fontSize: "14px",
+                    fontFamily: "monospace",
+                    resize: "vertical",
+                    minHeight: "60px",
+                    backgroundColor: "white",
+                    color: "#172b4d",
+                  }}
+                  placeholder="Enter JQL query..."
+                />
+                <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                  <button
+                    type="submit"
+                    disabled={loading || !localJQL.trim()}
+                    style={{
+                      backgroundColor:
+                        loading || !localJQL.trim() ? "#ccc" : "#0052cc",
+                      color: "white",
+                      border: "none",
+                      padding: "10px 16px",
+                      borderRadius: "4px",
+                      cursor:
+                        loading || !localJQL.trim() ? "not-allowed" : "pointer",
+                      fontSize: "14px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    {loading ? "Searching..." : "🔍 Search Issues"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRefreshIssues}
+                    disabled={loading || !currentJQL.trim()}
+                    style={{
+                      backgroundColor:
+                        loading || !currentJQL.trim() ? "#ccc" : "#00875a",
+                      color: "white",
+                      border: "none",
+                      padding: "10px 16px",
+                      borderRadius: "4px",
+                      cursor:
+                        loading || !currentJQL.trim()
+                          ? "not-allowed"
+                          : "pointer",
+                      fontSize: "14px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    {loading ? "Refreshing..." : "🔄 Refresh"}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Summary Section */}
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: "8px",
-                fontSize: "12px",
-                color: "#5e6c84",
+                borderTop: "1px solid #dfe1e6",
+                paddingTop: "16px",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Total Issues:</span>
-                <span style={{ fontWeight: "600", color: "#172b4d" }}>
-                  {getEnhancedIssues().length}
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Issues with Sprint:</span>
-                <span style={{ fontWeight: "600", color: "#2e7d32" }}>
-                  {getEnhancedIssues().filter((i) => i.sprint).length}
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>PM Approval Required:</span>
-                <span style={{ fontWeight: "600", color: "#ff8b00" }}>
-                  {
-                    getEnhancedIssues().filter((i) => i.pmApprovalRequired)
-                      .length
-                  }
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Post Check Required:</span>
-                <span style={{ fontWeight: "600", color: "#0052cc" }}>
-                  {
-                    getEnhancedIssues().filter(
-                      (i) => i.postCheckApprovalRequired
-                    ).length
-                  }
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Test Result Required:</span>
-                <span style={{ fontWeight: "600", color: "#6554c0" }}>
-                  {
-                    getEnhancedIssues().filter(
-                      (i) => i.testResultApprovalRequired
-                    ).length
-                  }
-                </span>
+              <h3
+                style={{
+                  color: "#172b4d",
+                  marginBottom: "12px",
+                  fontSize: "16px",
+                  fontWeight: "600",
+                }}
+              >
+                Summary
+              </h3>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "8px",
+                  fontSize: "12px",
+                  color: "#5e6c84",
+                }}
+              >
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span>Total Issues:</span>
+                  <span style={{ fontWeight: "600", color: "#172b4d" }}>
+                    {getEnhancedIssues().length}
+                  </span>
+                </div>
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span>Issues with Sprint:</span>
+                  <span style={{ fontWeight: "600", color: "#2e7d32" }}>
+                    {getEnhancedIssues().filter((i) => i.sprint).length}
+                  </span>
+                </div>
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span>PM Approval Required:</span>
+                  <span style={{ fontWeight: "600", color: "#ff8b00" }}>
+                    {
+                      getEnhancedIssues().filter((i) => i.pmApprovalRequired)
+                        .length
+                    }
+                  </span>
+                </div>
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span>Post Check Required:</span>
+                  <span style={{ fontWeight: "600", color: "#0052cc" }}>
+                    {
+                      getEnhancedIssues().filter(
+                        (i) => i.postCheckApprovalRequired
+                      ).length
+                    }
+                  </span>
+                </div>
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span>Test Result Required:</span>
+                  <span style={{ fontWeight: "600", color: "#6554c0" }}>
+                    {
+                      getEnhancedIssues().filter(
+                        (i) => i.testResultApprovalRequired
+                      ).length
+                    }
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div
-          id="controls"
-          style={{
-            marginBottom: "20px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "15px",
-          }}
-        >
-          <div>
-            <label style={{ marginBottom: "5px", display: "block" }}>
-              Filter by Approval Needs:
-            </label>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <button
-                onClick={clearRemarkFilters}
-                style={{
-                  backgroundColor:
-                    remarkFilters.length === 0 ? "#0052cc" : "#f4f5f7",
-                  color: remarkFilters.length === 0 ? "white" : "#5e6c84",
-                  border:
-                    remarkFilters.length === 0 ? "none" : "1px solid #dfe1e6",
-                  padding: "8px 12px",
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                  fontSize: "0.9em",
-                }}
-              >
-                Show All {remarkFilters.length === 0 && "✓"}
-              </button>
-              <button
-                onClick={() => toggleRemarkFilter("Need PM Approve")}
-                style={{
-                  backgroundColor: remarkFilters.includes("Need PM Approve")
-                    ? "#ffebee"
-                    : "#f4f5f7",
-                  color: remarkFilters.includes("Need PM Approve")
-                    ? "#c62828"
-                    : "#5e6c84",
-                  border: remarkFilters.includes("Need PM Approve")
-                    ? "1px solid #ffcdd2"
-                    : "1px solid #dfe1e6",
-                  padding: "8px 12px",
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                  fontSize: "0.9em",
-                  fontWeight: remarkFilters.includes("Need PM Approve")
-                    ? "600"
-                    : "normal",
-                }}
-              >
-                Need PM Approve{" "}
-                {remarkFilters.includes("Need PM Approve") && "✓"}
-              </button>
-              <button
-                onClick={() => toggleRemarkFilter("Need Post check")}
-                style={{
-                  backgroundColor: remarkFilters.includes("Need Post check")
-                    ? "#e8f5e8"
-                    : "#f4f5f7",
-                  color: remarkFilters.includes("Need Post check")
-                    ? "#2e7d32"
-                    : "#5e6c84",
-                  border: remarkFilters.includes("Need Post check")
-                    ? "1px solid #c8e6c9"
-                    : "1px solid #dfe1e6",
-                  padding: "8px 12px",
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                  fontSize: "0.9em",
-                  fontWeight: remarkFilters.includes("Need Post check")
-                    ? "600"
-                    : "normal",
-                }}
-              >
-                Need Post Check{" "}
-                {remarkFilters.includes("Need Post check") && "✓"}
-              </button>
-              <button
-                onClick={() => toggleRemarkFilter("Need test result")}
-                style={{
-                  backgroundColor: remarkFilters.includes("Need test result")
-                    ? "#e3f2fd"
-                    : "#f4f5f7",
-                  color: remarkFilters.includes("Need test result")
-                    ? "#1976d2"
-                    : "#5e6c84",
-                  border: remarkFilters.includes("Need test result")
-                    ? "1px solid #bbdefb"
-                    : "1px solid #dfe1e6",
-                  padding: "8px 12px",
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                  fontSize: "0.9em",
-                  fontWeight: remarkFilters.includes("Need test result")
-                    ? "600"
-                    : "normal",
-                }}
-              >
-                Need Test Result{" "}
-                {remarkFilters.includes("Need test result") && "✓"}
-              </button>
-              {remarkFilters.length > 0 && (
+          <div
+            id="controls"
+            style={{
+              marginBottom: "20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "15px",
+            }}
+          >
+            <div>
+              <label style={{ marginBottom: "5px", display: "block" }}>
+                Filter by Approval Needs:
+              </label>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <button
                   onClick={clearRemarkFilters}
                   style={{
-                    backgroundColor: "#ff5722",
-                    color: "white",
-                    border: "none",
+                    backgroundColor:
+                      remarkFilters.length === 0 ? "#0052cc" : "#f4f5f7",
+                    color: remarkFilters.length === 0 ? "white" : "#5e6c84",
+                    border:
+                      remarkFilters.length === 0 ? "none" : "1px solid #dfe1e6",
                     padding: "8px 12px",
                     borderRadius: "3px",
                     cursor: "pointer",
                     fontSize: "0.9em",
                   }}
                 >
-                  Clear Filters
+                  Show All {remarkFilters.length === 0 && "✓"}
                 </button>
-              )}
-            </div>
-            {remarkFilters.length > 0 && (
-              <div
-                style={{
-                  marginTop: "8px",
-                  fontSize: "0.9em",
-                  color: "#5e6c84",
-                }}
-              >
-                Active filters: {remarkFilters.join(", ")}
-                <span style={{ fontWeight: "600", color: "#0052cc" }}>
-                  ({filteredIssues.length} issues)
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label style={{ marginBottom: "5px", display: "block" }}>
-              Filter by Status:
-            </label>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <button
-                onClick={clearStatusFilters}
-                style={{
-                  backgroundColor:
-                    statusFilters.length === 0 ? "#0052cc" : "#f4f5f7",
-                  color: statusFilters.length === 0 ? "white" : "#5e6c84",
-                  border:
-                    statusFilters.length === 0 ? "none" : "1px solid #dfe1e6",
-                  padding: "8px 12px",
-                  borderRadius: "3px",
-                  cursor: "pointer",
-                  fontSize: "0.9em",
-                }}
-              >
-                All Status {statusFilters.length === 0 && "✓"}
-              </button>
-              {sortStatuses([
-                ...new Set(getEnhancedIssues().map((issue) => issue.status)),
-              ]).map((status) => (
                 <button
-                  key={status}
-                  onClick={() => toggleStatusFilter(status)}
+                  onClick={() => toggleRemarkFilter("Need PM Approve")}
                   style={{
-                    backgroundColor: statusFilters.includes(status)
+                    backgroundColor: remarkFilters.includes("Need PM Approve")
+                      ? "#ffebee"
+                      : "#f4f5f7",
+                    color: remarkFilters.includes("Need PM Approve")
+                      ? "#c62828"
+                      : "#5e6c84",
+                    border: remarkFilters.includes("Need PM Approve")
+                      ? "1px solid #ffcdd2"
+                      : "1px solid #dfe1e6",
+                    padding: "8px 12px",
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    fontSize: "0.9em",
+                    fontWeight: remarkFilters.includes("Need PM Approve")
+                      ? "600"
+                      : "normal",
+                  }}
+                >
+                  Need PM Approve{" "}
+                  {remarkFilters.includes("Need PM Approve") && "✓"}
+                </button>
+                <button
+                  onClick={() => toggleRemarkFilter("Need Post check")}
+                  style={{
+                    backgroundColor: remarkFilters.includes("Need Post check")
+                      ? "#e8f5e8"
+                      : "#f4f5f7",
+                    color: remarkFilters.includes("Need Post check")
+                      ? "#2e7d32"
+                      : "#5e6c84",
+                    border: remarkFilters.includes("Need Post check")
+                      ? "1px solid #c8e6c9"
+                      : "1px solid #dfe1e6",
+                    padding: "8px 12px",
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    fontSize: "0.9em",
+                    fontWeight: remarkFilters.includes("Need Post check")
+                      ? "600"
+                      : "normal",
+                  }}
+                >
+                  Need Post Check{" "}
+                  {remarkFilters.includes("Need Post check") && "✓"}
+                </button>
+                <button
+                  onClick={() => toggleRemarkFilter("Need test result")}
+                  style={{
+                    backgroundColor: remarkFilters.includes("Need test result")
                       ? "#e3f2fd"
                       : "#f4f5f7",
-                    color: statusFilters.includes(status)
+                    color: remarkFilters.includes("Need test result")
                       ? "#1976d2"
                       : "#5e6c84",
-                    border: statusFilters.includes(status)
+                    border: remarkFilters.includes("Need test result")
                       ? "1px solid #bbdefb"
                       : "1px solid #dfe1e6",
                     padding: "8px 12px",
                     borderRadius: "3px",
                     cursor: "pointer",
                     fontSize: "0.9em",
-                    fontWeight: statusFilters.includes(status)
+                    fontWeight: remarkFilters.includes("Need test result")
                       ? "600"
                       : "normal",
                   }}
                 >
-                  {status} {statusFilters.includes(status) && "✓"}
+                  Need Test Result{" "}
+                  {remarkFilters.includes("Need test result") && "✓"}
                 </button>
-              ))}
-              {statusFilters.length > 0 && (
+                {remarkFilters.length > 0 && (
+                  <button
+                    onClick={clearRemarkFilters}
+                    style={{
+                      backgroundColor: "#ff5722",
+                      color: "white",
+                      border: "none",
+                      padding: "8px 12px",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "0.9em",
+                    }}
+                  >
+                    Clear Filters
+                  </button>
+                )}
+              </div>
+              {remarkFilters.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "0.9em",
+                    color: "#5e6c84",
+                  }}
+                >
+                  Active filters: {remarkFilters.join(", ")}
+                  <span style={{ fontWeight: "600", color: "#0052cc" }}>
+                    ({filteredIssues.length} issues)
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label style={{ marginBottom: "5px", display: "block" }}>
+                Filter by Status:
+              </label>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <button
                   onClick={clearStatusFilters}
                   style={{
-                    backgroundColor: "#ff5722",
-                    color: "white",
-                    border: "none",
+                    backgroundColor:
+                      statusFilters.length === 0 ? "#0052cc" : "#f4f5f7",
+                    color: statusFilters.length === 0 ? "white" : "#5e6c84",
+                    border:
+                      statusFilters.length === 0 ? "none" : "1px solid #dfe1e6",
                     padding: "8px 12px",
                     borderRadius: "3px",
                     cursor: "pointer",
                     fontSize: "0.9em",
                   }}
                 >
-                  Clear Status Filters
+                  All Status {statusFilters.length === 0 && "✓"}
                 </button>
+                {sortStatuses([
+                  ...new Set(getEnhancedIssues().map((issue) => issue.status)),
+                ]).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => toggleStatusFilter(status)}
+                    style={{
+                      backgroundColor: statusFilters.includes(status)
+                        ? "#e3f2fd"
+                        : "#f4f5f7",
+                      color: statusFilters.includes(status)
+                        ? "#1976d2"
+                        : "#5e6c84",
+                      border: statusFilters.includes(status)
+                        ? "1px solid #bbdefb"
+                        : "1px solid #dfe1e6",
+                      padding: "8px 12px",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "0.9em",
+                      fontWeight: statusFilters.includes(status)
+                        ? "600"
+                        : "normal",
+                    }}
+                  >
+                    {status} {statusFilters.includes(status) && "✓"}
+                  </button>
+                ))}
+                {statusFilters.length > 0 && (
+                  <button
+                    onClick={clearStatusFilters}
+                    style={{
+                      backgroundColor: "#ff5722",
+                      color: "white",
+                      border: "none",
+                      padding: "8px 12px",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "0.9em",
+                    }}
+                  >
+                    Clear Status Filters
+                  </button>
+                )}
+              </div>
+              {statusFilters.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "0.9em",
+                    color: "#5e6c84",
+                  }}
+                >
+                  Active status filters: {statusFilters.join(", ")}
+                  <span style={{ fontWeight: "600", color: "#0052cc" }}>
+                    ({filteredIssues.length} issues)
+                  </span>
+                </div>
               )}
             </div>
-            {statusFilters.length > 0 && (
-              <div
-                style={{
-                  marginTop: "8px",
-                  fontSize: "0.9em",
-                  color: "#5e6c84",
-                }}
-              >
-                Active status filters: {statusFilters.join(", ")}
-                <span style={{ fontWeight: "600", color: "#0052cc" }}>
-                  ({filteredIssues.length} issues)
-                </span>
-              </div>
-            )}
-          </div>
 
-          {(remarkFilters.length > 0 || statusFilters.length > 0) && (
+            <div>
+              <label style={{ marginBottom: "5px", display: "block" }}>
+                Filter by Assignee:
+              </label>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  onClick={clearAssigneeFilters}
+                  style={{
+                    backgroundColor:
+                      assigneeFilters.length === 0 ? "#0052cc" : "#f4f5f7",
+                    color: assigneeFilters.length === 0 ? "white" : "#5e6c84",
+                    border:
+                      assigneeFilters.length === 0
+                        ? "none"
+                        : "1px solid #dfe1e6",
+                    padding: "8px 12px",
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    fontSize: "0.9em",
+                  }}
+                >
+                  All Assignees {assigneeFilters.length === 0 && "✓"}
+                </button>
+                {sortAssignees([
+                  ...new Set(
+                    getEnhancedIssues().map(
+                      (issue) => issue.assignee?.displayName || "Unassigned"
+                    )
+                  ),
+                ]).map((assignee) => (
+                  <button
+                    key={assignee}
+                    onClick={() => toggleAssigneeFilter(assignee)}
+                    style={{
+                      backgroundColor: assigneeFilters.includes(assignee)
+                        ? "#e8f5e8"
+                        : "#f4f5f7",
+                      color: assigneeFilters.includes(assignee)
+                        ? "#2e7d32"
+                        : "#5e6c84",
+                      border: assigneeFilters.includes(assignee)
+                        ? "1px solid #c8e6c9"
+                        : "1px solid #dfe1e6",
+                      padding: "8px 12px",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "0.9em",
+                      fontWeight: assigneeFilters.includes(assignee)
+                        ? "600"
+                        : "normal",
+                    }}
+                  >
+                    {assignee} {assigneeFilters.includes(assignee) && "✓"}
+                  </button>
+                ))}
+                {assigneeFilters.length > 0 && (
+                  <button
+                    onClick={clearAssigneeFilters}
+                    style={{
+                      backgroundColor: "#ff5722",
+                      color: "white",
+                      border: "none",
+                      padding: "8px 12px",
+                      borderRadius: "3px",
+                      cursor: "pointer",
+                      fontSize: "0.9em",
+                    }}
+                  >
+                    Clear Assignee Filters
+                  </button>
+                )}
+              </div>
+              {assigneeFilters.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "0.9em",
+                    color: "#5e6c84",
+                  }}
+                >
+                  Active assignee filters: {assigneeFilters.join(", ")}
+                  <span style={{ fontWeight: "600", color: "#0052cc" }}>
+                    ({filteredIssues.length} issues)
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Task List Generation Section - Always Visible */}
             <div>
               <button
-                onClick={clearAllAdvancedFilters}
+                onClick={generateTaskList}
                 style={{
-                  backgroundColor: "#f44336",
+                  backgroundColor: "#4caf50",
                   color: "white",
                   border: "none",
                   padding: "10px 16px",
@@ -1627,568 +1928,927 @@ const Board: React.FC = () => {
                   cursor: "pointer",
                   fontSize: "0.9em",
                   fontWeight: "600",
+                  marginRight: "10px",
                 }}
               >
-                Clear All Advanced Filters
+                📋 Generate Task List
               </button>
+              {(remarkFilters.length > 0 ||
+                statusFilters.length > 0 ||
+                assigneeFilters.length > 0) && (
+                <button
+                  onClick={clearAllAdvancedFilters}
+                  style={{
+                    backgroundColor: "#f44336",
+                    color: "white",
+                    border: "none",
+                    padding: "10px 16px",
+                    borderRadius: "3px",
+                    cursor: "pointer",
+                    fontSize: "0.9em",
+                    fontWeight: "600",
+                  }}
+                >
+                  Clear All Advanced Filters
+                </button>
+              )}
+            </div>
+
+            {/* Generated Task List Section */}
+            {showTaskList && (
+              <div
+                style={{
+                  backgroundColor: "#f8f9fa",
+                  border: "1px solid #e9ecef",
+                  borderRadius: "8px",
+                  padding: "20px",
+                  marginTop: "20px",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                }}
+              >
+                <h3
+                  style={{
+                    color: "#172b4d",
+                    marginTop: 0,
+                    marginBottom: "16px",
+                    fontSize: "16px",
+                    fontWeight: "600",
+                  }}
+                >
+                  Generated Task List (
+                  {taskListItems.filter((item) => item.selected).length} of{" "}
+                  {taskListItems.length} selected)
+                </h3>
+
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#5e6c84",
+                    marginBottom: "12px",
+                    fontWeight: "600",
+                  }}
+                >
+                  Format: {getFormatString()} (sorted by assignee)
+                </div>
+
+                {/* Format Field Selection */}
+                <div
+                  style={{
+                    marginBottom: "12px",
+                    padding: "12px",
+                    backgroundColor: "#f8f9fa",
+                    borderRadius: "4px",
+                    border: "1px solid #e9ecef",
+                  }}
+                >
+                  <h4
+                    style={{
+                      margin: "0 0 8px 0",
+                      fontSize: "14px",
+                      fontWeight: "600",
+                      color: "#172b4d",
+                    }}
+                  >
+                    Select Fields to Include:
+                  </h4>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(150px, 1fr))",
+                      gap: "8px",
+                    }}
+                  >
+                    {[
+                      { key: "key", label: "Key (with link)" },
+                      { key: "status", label: "Status" },
+                      { key: "assignee", label: "Assignee" },
+                      { key: "summary", label: "Summary" },
+                      { key: "remarks", label: "Remarks" },
+                      { key: "priority", label: "Priority" },
+                      { key: "sprint", label: "Sprint" },
+                      { key: "issueType", label: "Issue Type" },
+                      { key: "created", label: "Created" },
+                      { key: "updated", label: "Updated" },
+                    ].map((field) => (
+                      <label
+                        key={field.key}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          fontSize: "13px",
+                          cursor: "pointer",
+                          padding: "4px",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={
+                            formatFields[field.key as keyof typeof formatFields]
+                          }
+                          onChange={() =>
+                            handleFormatFieldToggle(
+                              field.key as keyof typeof formatFields
+                            )
+                          }
+                          style={{
+                            marginRight: "6px",
+                            cursor: "pointer",
+                          }}
+                        />
+                        <span style={{ color: "#172b4d" }}>{field.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Select by Jira Issues - Collapsible */}
+                <div
+                  style={{
+                    marginBottom: "12px",
+                    border: "1px solid #dfe1e6",
+                    borderRadius: "4px",
+                    backgroundColor: "#f8f9fa",
+                  }}
+                >
+                  {/* Collapsible Header */}
+                  <div
+                    onClick={() =>
+                      setShowSelectAllSection(!showSelectAllSection)
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      backgroundColor: "#e9ecef",
+                      borderRadius: showSelectAllSection
+                        ? "4px 4px 0 0"
+                        : "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      cursor: "pointer",
+                      borderBottom: showSelectAllSection
+                        ? "1px solid #dfe1e6"
+                        : "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        color: "#172b4d",
+                      }}
+                    >
+                      Select by Jira Issues (
+                      {taskListItems.filter((item) => item.selected).length} of{" "}
+                      {taskListItems.length} selected)
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "14px",
+                        color: "#5e6c84",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {showSelectAllSection ? "▲ Hide" : "▼ Show"}
+                    </span>
+                  </div>
+
+                  {/* Collapsible Content */}
+                  {showSelectAllSection && (
+                    <div
+                      style={{
+                        padding: "12px",
+                        backgroundColor: "#f8f9fa",
+                      }}
+                    >
+                      {/* Select All / None Control */}
+                      <div
+                        style={{
+                          marginBottom: "12px",
+                          padding: "8px 12px",
+                          backgroundColor: "#e9ecef",
+                          borderRadius: "4px",
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectAll}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          style={{
+                            marginRight: "8px",
+                            cursor: "pointer",
+                          }}
+                        />
+                        <label
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: "600",
+                            color: "#172b4d",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => handleSelectAll(!selectAll)}
+                        >
+                          Select All / None
+                        </label>
+                      </div>
+
+                      {/* Task List with Checkboxes */}
+                      <div
+                        style={{
+                          maxHeight: "400px",
+                          overflowY: "auto",
+                          border: "1px solid #dfe1e6",
+                          borderRadius: "4px",
+                          backgroundColor: "white",
+                        }}
+                      >
+                        {taskListItems.map((item, index) => (
+                          <div
+                            key={item.id}
+                            style={{
+                              padding: "8px 12px",
+                              borderBottom:
+                                index < taskListItems.length - 1
+                                  ? "1px solid #f0f0f0"
+                                  : "none",
+                              display: "flex",
+                              alignItems: "flex-start",
+                              fontSize: "12px",
+                              fontFamily: "monospace",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={item.selected}
+                              onChange={(e) =>
+                                handleTaskSelection(item.id, e.target.checked)
+                              }
+                              style={{
+                                marginRight: "8px",
+                                marginTop: "2px",
+                                cursor: "pointer",
+                                flexShrink: 0,
+                              }}
+                            />
+                            <span
+                              style={{
+                                wordBreak: "break-all",
+                                color: item.selected ? "#172b4d" : "#6b778c",
+                                textDecoration: item.selected
+                                  ? "none"
+                                  : "line-through",
+                                opacity: item.selected ? 1 : 0.6,
+                              }}
+                            >
+                              {item.text}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Copy Text Area (Hidden by default, shows selected items) */}
+                <div style={{ marginTop: "12px" }}>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: "4px",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      color: "#5e6c84",
+                    }}
+                  >
+                    Selected Items (
+                    {taskListItems.filter((item) => item.selected).length}{" "}
+                    items):
+                  </label>
+                  <textarea
+                    value={generatedTaskList}
+                    readOnly
+                    style={{
+                      width: "100%",
+                      minHeight: "150px",
+                      maxHeight: "400px",
+                      height: `${Math.max(
+                        150,
+                        Math.min(
+                          400,
+                          generatedTaskList.split("\n").length * 20 + 40
+                        )
+                      )}px`,
+                      padding: "12px",
+                      border: "1px solid #dfe1e6",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      fontFamily: "monospace",
+                      backgroundColor: "#f8f9fa",
+                      color: "#172b4d",
+                      resize: "vertical",
+                      boxSizing: "border-box",
+                      overflow: "auto",
+                    }}
+                    placeholder="Selected tasks will appear here..."
+                  />
+                  <div style={{ marginTop: "12px" }}>
+                    <button
+                      onClick={copyTaskList}
+                      style={{
+                        backgroundColor: "#0052cc",
+                        color: "white",
+                        border: "none",
+                        padding: "8px 16px",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                        marginRight: "10px",
+                      }}
+                    >
+                      📋 Copy Selected (
+                      {taskListItems.filter((item) => item.selected).length})
+                    </button>
+                    <button
+                      onClick={() => setShowTaskList(false)}
+                      style={{
+                        backgroundColor: "#6b778c",
+                        color: "white",
+                        border: "none",
+                        padding: "8px 16px",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {loading && (
+            <div
+              style={{
+                padding: "10px",
+                margin: "10px 0",
+                borderRadius: "3px",
+                backgroundColor: "#e9f2ff",
+                color: "#0052cc",
+              }}
+            >
+              Loading issues...
             </div>
           )}
-        </div>
 
-        {loading && (
-          <div
-            style={{
-              padding: "10px",
-              margin: "10px 0",
-              borderRadius: "3px",
-              backgroundColor: "#e9f2ff",
-              color: "#0052cc",
-            }}
-          >
-            Loading issues...
-          </div>
-        )}
+          {error && (
+            <div
+              style={{
+                padding: "10px",
+                margin: "10px 0",
+                borderRadius: "3px",
+                backgroundColor: "#ffebee",
+                color: "#c62828",
+                border: "1px solid #ffcdd2",
+              }}
+            >
+              {error}
+            </div>
+          )}
 
-        {error && (
-          <div
-            style={{
-              padding: "10px",
-              margin: "10px 0",
-              borderRadius: "3px",
-              backgroundColor: "#ffebee",
-              color: "#c62828",
-              border: "1px solid #ffcdd2",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {!loading && !error && (
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              marginTop: "20px",
-              tableLayout: "fixed",
-            }}
-          >
-            <thead>
-              <tr>
-                <th
-                  onClick={() => handleSort("key")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "8%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Key
-                  <span style={{ float: "right" }}>{getSortIcon("key")}</span>
-                </th>
-                <th
-                  onClick={() => handleSort("summary")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "20%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Summary
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("summary")}
-                  </span>
-                </th>
-                <th
-                  onClick={() => handleSort("sprint")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "10%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Sprint
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("sprint")}
-                  </span>
-                </th>
-                <th
-                  onClick={() => handleSort("status")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "9%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Status
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("status")}
-                  </span>
-                </th>
-                <th
-                  onClick={() => handleSort("type")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "9%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Type
-                  <span style={{ float: "right" }}>{getSortIcon("type")}</span>
-                </th>
-                <th
-                  onClick={() => handleSort("assignee")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "11%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Assignee
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("assignee")}
-                  </span>
-                </th>
-                <th
-                  onClick={() => handleSort("priority")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "7%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Priority
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("priority")}
-                  </span>
-                </th>
-                <th
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "13%",
-                  }}
-                >
-                  Labels
-                </th>
-                <th
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "10%",
-                  }}
-                >
-                  Remarks
-                </th>
-                <th
-                  onClick={() => handleSort("created")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "5.5%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Created
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("created")}
-                  </span>
-                </th>
-                <th
-                  onClick={() => handleSort("updated")}
-                  style={{
-                    border: "1px solid #dfe1e6",
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    backgroundColor: "#f4f5f7",
-                    fontWeight: 600,
-                    color: "#5e6c84",
-                    width: "5.5%",
-                    cursor: "pointer",
-                  }}
-                >
-                  Updated
-                  <span style={{ float: "right" }}>
-                    {getSortIcon("updated")}
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredIssues.map((issue, index) => (
-                <tr
-                  key={issue.id}
-                  style={{
-                    backgroundColor: index % 2 === 0 ? "#ffffff" : "#f9fafb",
-                    cursor: "pointer",
-                  }}
-                  onClick={() =>
-                    window.open(getJiraIssueUrl(issue.key), "_blank")
-                  }
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = "#e3f2fd";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor =
-                      index % 2 === 0 ? "#ffffff" : "#f9fafb";
-                  }}
-                >
-                  <td
+          {!loading && !error && (
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                marginTop: "20px",
+                tableLayout: "fixed",
+              }}
+            >
+              <thead>
+                <tr>
+                  <th
+                    onClick={() => handleSort("key")}
                     style={{
                       border: "1px solid #dfe1e6",
                       padding: "10px 12px",
-                      verticalAlign: "top",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "8%",
+                      cursor: "pointer",
                     }}
                   >
-                    <a
-                      href={getJiraIssueUrl(issue.key)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: "#0052cc", textDecoration: "none" }}
-                      onClick={(e) => e.stopPropagation()}
+                    Key
+                    <span style={{ float: "right" }}>{getSortIcon("key")}</span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("summary")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "20%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Summary
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("summary")}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("sprint")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "10%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Sprint
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("sprint")}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("status")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "9%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Status
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("status")}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("type")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "9%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Type
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("type")}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("assignee")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "11%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Assignee
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("assignee")}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("priority")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "7%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Priority
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("priority")}
+                    </span>
+                  </th>
+                  <th
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "13%",
+                    }}
+                  >
+                    Labels
+                  </th>
+                  <th
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "10%",
+                    }}
+                  >
+                    Remarks
+                  </th>
+                  <th
+                    onClick={() => handleSort("created")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "5.5%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Created
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("created")}
+                    </span>
+                  </th>
+                  <th
+                    onClick={() => handleSort("updated")}
+                    style={{
+                      border: "1px solid #dfe1e6",
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      backgroundColor: "#f4f5f7",
+                      fontWeight: 600,
+                      color: "#5e6c84",
+                      width: "5.5%",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Updated
+                    <span style={{ float: "right" }}>
+                      {getSortIcon("updated")}
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredIssues.map((issue, index) => (
+                  <tr
+                    key={issue.id}
+                    style={{
+                      backgroundColor: index % 2 === 0 ? "#ffffff" : "#f9fafb",
+                      cursor: "pointer",
+                    }}
+                    onClick={() =>
+                      window.open(getJiraIssueUrl(issue.key), "_blank")
+                    }
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "#e3f2fd";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor =
+                        index % 2 === 0 ? "#ffffff" : "#f9fafb";
+                    }}
+                  >
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                      }}
                     >
-                      {issue.key}
-                    </a>
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                      maxWidth: "250px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {issue.summary}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                      fontSize: "0.9em",
-                    }}
-                  >
-                    {issue.sprint ? (
+                      <a
+                        href={getJiraIssueUrl(issue.key)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "#0052cc", textDecoration: "none" }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {issue.key}
+                      </a>
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                        maxWidth: "250px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {issue.summary}
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                        fontSize: "0.9em",
+                      }}
+                    >
+                      {issue.sprint ? (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            backgroundColor: "#e8f5e8",
+                            color: "#2e7d32",
+                            padding: "3px 8px",
+                            borderRadius: "3px",
+                            fontSize: "0.8em",
+                            fontWeight: 500,
+                            border: "1px solid #c8e6c9",
+                            maxWidth: "100%",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={issue.sprint.name}
+                        >
+                          {issue.sprint.name}
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            color: "#999",
+                            fontStyle: "italic",
+                            fontSize: "0.9em",
+                          }}
+                        >
+                          No sprint
+                        </span>
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                      }}
+                    >
                       <span
                         style={{
                           display: "inline-block",
-                          backgroundColor: "#e8f5e8",
-                          color: "#2e7d32",
                           padding: "3px 8px",
                           borderRadius: "3px",
                           fontSize: "0.8em",
                           fontWeight: 500,
-                          border: "1px solid #c8e6c9",
-                          maxWidth: "100%",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          textTransform: "uppercase",
                           whiteSpace: "nowrap",
-                        }}
-                        title={issue.sprint.name}
-                      >
-                        {issue.sprint.name}
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          color: "#999",
-                          fontStyle: "italic",
-                          fontSize: "0.9em",
+                          backgroundColor: getStatusColor(issue.status),
+                          color: "white",
                         }}
                       >
-                        No sprint
+                        {issue.status}
                       </span>
-                    )}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                    }}
-                  >
-                    <span
+                    </td>
+                    <td
                       style={{
-                        display: "inline-block",
-                        padding: "3px 8px",
-                        borderRadius: "3px",
-                        fontSize: "0.8em",
-                        fontWeight: 500,
-                        textTransform: "uppercase",
-                        whiteSpace: "nowrap",
-                        backgroundColor: getStatusColor(issue.status),
-                        color: "white",
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
                       }}
                     >
-                      {issue.status}
-                    </span>
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                    }}
-                  >
-                    {issue.issueType}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                    }}
-                  >
-                    {issue.assignee?.displayName || "Unassigned"}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                    }}
-                  >
-                    <span
+                      {issue.issueType}
+                    </td>
+                    <td
                       style={{
-                        display: "inline-block",
-                        padding: "3px 8px",
-                        borderRadius: "3px",
-                        fontSize: "0.8em",
-                        fontWeight: 500,
-                        textTransform: "uppercase",
-                        whiteSpace: "nowrap",
-                        backgroundColor:
-                          issue.priority === "Highest"
-                            ? "#de350b"
-                            : issue.priority === "High"
-                            ? "#ff5630"
-                            : issue.priority === "Medium"
-                            ? "#ffab00"
-                            : issue.priority === "Low"
-                            ? "#36b37e"
-                            : issue.priority === "Lowest"
-                            ? "#6b778c"
-                            : "#ddd",
-                        color: "white",
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
                       }}
                     >
-                      {issue.priority}
-                    </span>
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                      maxWidth: "200px",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {issue.labels && issue.labels.length > 0 ? (
-                      issue.labels.map((label, labelIndex) => (
-                        <span
-                          key={labelIndex}
-                          style={{
-                            display: "inline-block",
-                            backgroundColor: "#e3f2fd",
-                            color: "#1976d2",
-                            padding: "2px 8px",
-                            borderRadius: "12px",
-                            fontSize: "0.8em",
-                            margin: "1px 2px",
-                            border: "1px solid #bbdefb",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {label}
-                        </span>
-                      ))
-                    ) : (
+                      {issue.assignee?.displayName || "Unassigned"}
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                      }}
+                    >
                       <span
                         style={{
-                          color: "#999",
-                          fontStyle: "italic",
-                          fontSize: "0.9em",
+                          display: "inline-block",
+                          padding: "3px 8px",
+                          borderRadius: "3px",
+                          fontSize: "0.8em",
+                          fontWeight: 500,
+                          textTransform: "uppercase",
+                          whiteSpace: "nowrap",
+                          backgroundColor:
+                            issue.priority === "Highest"
+                              ? "#de350b"
+                              : issue.priority === "High"
+                              ? "#ff5630"
+                              : issue.priority === "Medium"
+                              ? "#ffab00"
+                              : issue.priority === "Low"
+                              ? "#36b37e"
+                              : issue.priority === "Lowest"
+                              ? "#6b778c"
+                              : "#ddd",
+                          color: "white",
                         }}
                       >
-                        No labels
+                        {issue.priority}
                       </span>
-                    )}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                    }}
-                  >
-                    {(() => {
-                      const labels = issue.labels || [];
-                      const issueType = issue.issueType?.toLowerCase();
-                      const hasTestResultApproved = labels.includes(
-                        "TEST_RESULT_APPROVED"
-                      );
-                      const hasPostCheckApproved = labels.includes(
-                        "POST_CHECK_APPROVED"
-                      );
-                      const hasPmApprove = labels.includes("PM_APPROVE");
-                      const needsPmApproval =
-                        (issueType === "story" ||
-                          issueType === "production bug") &&
-                        !hasPmApprove;
-
-                      const remarks = [];
-
-                      if (needsPmApproval) {
-                        remarks.push("Need PM Approve");
-                      }
-
-                      if (!hasPostCheckApproved) {
-                        remarks.push("Need Post check");
-                      }
-
-                      if (!hasTestResultApproved) {
-                        remarks.push("Need test result");
-                      }
-
-                      if (remarks.length === 0) {
-                        return (
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                        maxWidth: "200px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {issue.labels && issue.labels.length > 0 ? (
+                        issue.labels.map((label, labelIndex) => (
                           <span
+                            key={labelIndex}
                             style={{
-                              color: "#999",
-                              fontStyle: "italic",
-                              fontSize: "0.9em",
+                              display: "inline-block",
+                              backgroundColor: "#e3f2fd",
+                              color: "#1976d2",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontSize: "0.8em",
+                              margin: "1px 2px",
+                              border: "1px solid #bbdefb",
+                              whiteSpace: "nowrap",
                             }}
                           >
-                            No remarks
+                            {label}
                           </span>
-                        );
-                      }
-
-                      return remarks.map((remark, index) => (
+                        ))
+                      ) : (
                         <span
-                          key={index}
                           style={{
-                            display: "inline-block",
-                            backgroundColor:
-                              remark === "Need PM Approve"
-                                ? "#ffebee"
-                                : remark === "Need Post check"
-                                ? "#e8f5e8"
-                                : "#e3f2fd",
-                            color:
-                              remark === "Need PM Approve"
-                                ? "#c62828"
-                                : remark === "Need Post check"
-                                ? "#2e7d32"
-                                : "#1976d2",
-                            padding: "2px 6px",
-                            borderRadius: "3px",
-                            fontSize: "0.8em",
-                            margin: "1px",
-                            border:
-                              remark === "Need PM Approve"
-                                ? "1px solid #ffcdd2"
-                                : remark === "Need Post check"
-                                ? "1px solid #c8e6c9"
-                                : "1px solid #bbdefb",
+                            color: "#999",
+                            fontStyle: "italic",
+                            fontSize: "0.9em",
                           }}
                         >
-                          {remark}
+                          No labels
                         </span>
-                      ));
-                    })()}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                      fontSize: "0.9em",
-                    }}
-                  >
-                    {formatDate(issue.created)}
-                  </td>
-                  <td
-                    style={{
-                      border: "1px solid #dfe1e6",
-                      padding: "10px 12px",
-                      verticalAlign: "top",
-                      fontSize: "0.9em",
-                    }}
-                  >
-                    {formatDate(issue.updated)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                      }}
+                    >
+                      {(() => {
+                        const labels = issue.labels || [];
+                        const issueType = issue.issueType?.toLowerCase();
+                        const hasTestResultApproved = labels.includes(
+                          "TEST_RESULT_APPROVED"
+                        );
+                        const hasPostCheckApproved = labels.includes(
+                          "POST_CHECK_APPROVED"
+                        );
+                        const hasPmApproved = labels.includes("PM_APPROVED");
+                        const needsPmApproval =
+                          (issueType === "story" ||
+                            issueType === "production bug") &&
+                          !hasPmApproved;
 
-        {!loading && !error && filteredIssues.length === 0 && (
-          <div
-            style={{
-              textAlign: "center",
-              color: "#666",
-              fontStyle: "italic",
-              padding: "20px",
-            }}
-          >
-            No issues found.
-          </div>
-        )}
+                        const remarks = [];
+
+                        if (needsPmApproval) {
+                          remarks.push("Need PM Approve");
+                        }
+
+                        if (!hasPostCheckApproved) {
+                          remarks.push("Need Post check");
+                        }
+
+                        if (!hasTestResultApproved) {
+                          remarks.push("Need test result");
+                        }
+
+                        if (remarks.length === 0) {
+                          return (
+                            <span
+                              style={{
+                                color: "#999",
+                                fontStyle: "italic",
+                                fontSize: "0.9em",
+                              }}
+                            >
+                              No remarks
+                            </span>
+                          );
+                        }
+
+                        return remarks.map((remark, index) => (
+                          <span
+                            key={index}
+                            style={{
+                              display: "inline-block",
+                              backgroundColor:
+                                remark === "Need PM Approve"
+                                  ? "#ffebee"
+                                  : remark === "Need Post check"
+                                  ? "#e8f5e8"
+                                  : "#e3f2fd",
+                              color:
+                                remark === "Need PM Approve"
+                                  ? "#c62828"
+                                  : remark === "Need Post check"
+                                  ? "#2e7d32"
+                                  : "#1976d2",
+                              padding: "2px 6px",
+                              borderRadius: "3px",
+                              fontSize: "0.8em",
+                              margin: "1px",
+                              border:
+                                remark === "Need PM Approve"
+                                  ? "1px solid #ffcdd2"
+                                  : remark === "Need Post check"
+                                  ? "1px solid #c8e6c9"
+                                  : "1px solid #bbdefb",
+                            }}
+                          >
+                            {remark}
+                          </span>
+                        ));
+                      })()}
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                        fontSize: "0.9em",
+                      }}
+                    >
+                      {formatDate(issue.created)}
+                    </td>
+                    <td
+                      style={{
+                        border: "1px solid #dfe1e6",
+                        padding: "10px 12px",
+                        verticalAlign: "top",
+                        fontSize: "0.9em",
+                      }}
+                    >
+                      {formatDate(issue.updated)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {!loading && !error && filteredIssues.length === 0 && (
+            <div
+              style={{
+                textAlign: "center",
+                color: "#666",
+                fontStyle: "italic",
+                padding: "20px",
+              }}
+            >
+              No issues found.
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
