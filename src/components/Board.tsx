@@ -11,7 +11,6 @@ const Board: React.FC = () => {
     filters,
     currentJQL,
     setCurrentJQL,
-    setFilters,
     setIssues,
     setLoading,
     setError,
@@ -855,6 +854,7 @@ const Board: React.FC = () => {
 
   // Debug function to check fields
   const checkFields = async () => {
+    // eslint-disable-line @typescript-eslint/no-unused-vars
     try {
       const response = await axios.get("http://localhost:3000/api/jira-fields");
       console.log("Sprint fields available:", response.data);
@@ -899,6 +899,7 @@ const Board: React.FC = () => {
 
   // Multi-select dropdown component
   const MultiSelectDropdown: React.FC<{
+    // eslint-disable-line @typescript-eslint/no-unused-vars
     label: string;
     options: string[];
     selectedValues: string[];
@@ -1095,6 +1096,7 @@ const Board: React.FC = () => {
 
   // Clear all multi-select filters
   const clearAllMultiSelectFilters = () => {
+    // eslint-disable-line @typescript-eslint/no-unused-vars
     setSelectedStatuses([]);
     setSelectedAssignees([]);
     setSelectedSprints([]);
